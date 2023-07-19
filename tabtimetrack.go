@@ -107,8 +107,9 @@ type Code struct {
 
 type SumLine struct {
 	Code        Code
-	Description string
+	Name        string
 	Duration    time.Duration
+	Description []string
 }
 
 func MultiplyRate(hourlyRate *big.Rat, dur time.Duration) *big.Rat {
@@ -126,10 +127,13 @@ func SumFunc(lineList []Line, f func(d civil.Date) []Code, desc func(code Code) 
 		for _, c := range cc {
 			s, ok := sums[c]
 			if !ok {
-				s = &SumLine{Code: c, Description: desc(c)}
+				s = &SumLine{Code: c, Name: desc(c)}
 				sums[c] = s
 			}
 			s.Duration += line.Duration
+			if len(line.Description) > 0 {
+				s.Description = append(s.Description, line.Description)
+			}
 		}
 	}
 	list := make([]*SumLine, 0, len(sums))

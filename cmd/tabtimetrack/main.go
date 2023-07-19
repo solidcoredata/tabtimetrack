@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -102,7 +103,12 @@ func run(ctx context.Context) error {
 			product := tabtimetrack.MultiplyRate(rate, sl.Duration)
 			amount = product.FloatString(2)
 		}
-		fmt.Fprintf(w, "%s:\t%s\t%s\n", sl.Description, sl.Duration.String(), amount)
+		desc := strings.Join(sl.Description, " ")
+		const limit = 50
+		if len(desc) > limit {
+			desc = desc[:limit] + "..."
+		}
+		fmt.Fprintf(w, "%s:\t%s\t%s\t%s\n", sl.Name, sl.Duration.String(), amount, desc)
 	}
 
 	return w.Flush()
