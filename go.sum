@@ -1,0 +1,5 @@
+cloud.google.com/go v0.110.6 h1:8uYAkj3YHTP/1iwReuHPxLSbdcyc+dSBbzFMrVwDR6Q=
+cloud.google.com/go v0.110.6/go.mod h1:+EYjdK8e5RME/VY/qLCAtuyALQ9q67dvuum8i+H5xsI=
+github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
+github.com/kardianos/task v0.0.0-20210112221240-c03b31243e29 h1:B/CQUhIw8IYyme3+PCL4+xRBmhfWrOJ5WD9rHZQr60Y=
+github.com/kardianos/task v0.0.0-20210112221240-c03b31243e29/go.mod h1:0ca1BtiKGUmiPLOQDzlPyCXNtBeQx9QktdnJNrGOKvA=
