@@ -89,11 +89,19 @@ func Parse(data []byte) (f File, err error) {
 		if len(ww) > 3 {
 			desc = string(ww[3])
 		}
+		dur := SubTime(te, ts)
+		if dur < 0 {
+			return f, fmt.Errorf("line %d: duration negative, end time before start time", ln)
+		}
+		const maxLine = 10 * time.Hour
+		if dur > maxLine {
+			return f, fmt.Errorf("line %d: duration larger then %s, this must be a mistake", ln, maxLine)
+		}
 		f.List = append(f.List, Line{
 			Date:        d,
 			Start:       ts,
 			Stop:        te,
-			Duration:    SubTime(te, ts),
+			Duration:    dur,
 			Description: desc,
 		})
 	}
