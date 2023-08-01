@@ -178,7 +178,7 @@ func run(ctx context.Context) error {
 		if len(descList) > 0 {
 			printed = true
 		}
-		fmt.Fprintf(out, "\n%s:\n", desc(sl.Code))
+		fmt.Fprintf(out, "\n%s: (hr: %s, am: %s)\n", desc(sl.Code), sl.Hours.FloatString(2), sl.Amount.FloatString(2))
 		for i, d := range descList {
 			if i > 0 {
 				fmt.Fprint(out, " ")
