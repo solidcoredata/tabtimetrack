@@ -32,7 +32,7 @@ const (
 	typeBreakout      = 11
 )
 
-const segmentType = "day(d)|week(wk)|month(mo)|year(yr)|all(a)|all-breakout(ab)"
+const segmentType = "day(d)|week(wk)|month(mo)|year(yr)|all(a)|all-breakout(ab)|breakout(br)"
 
 func parseType(list string) ([]int32, error) {
 	ss := strings.Split(list, ",")
@@ -54,6 +54,8 @@ func parseType(list string) ([]int32, error) {
 			tt = append(tt, typeAll)
 		case "ab", "all-breakout":
 			tt = append(tt, typeAllNoBreakout, typeBreakout)
+		case "br", "breakout":
+			tt = append(tt, typeBreakout)
 		}
 	}
 	return tt, nil
