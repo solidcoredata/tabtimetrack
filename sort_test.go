@@ -29,24 +29,21 @@ func TestDeduplicate(t *testing.T) {
 	}
 }
 
-func TestSplitStop(t *testing.T) {
+func TestSplitTask(t *testing.T) {
 	const stop = "."
 	list := []struct {
 		Name   string
-		Input  []string
-		Output []string
+		Input  string
+		Output []Task
 	}{
-		{"empty", []string{}, []string{}},
-		{"noop", []string{"abc.", "def."}, []string{"abc.", "def."}},
-		{"simple", []string{"Hello World."}, []string{"Hello World."}},
-		{"multiple", []string{"Hello World. Hello Block"}, []string{"Hello World.", "Hello Block."}},
-		{"multiple stop", []string{"Hello World. Hello Block."}, []string{"Hello World.", "Hello Block."}},
-		{"not empty", []string{""}, []string{}},
+		{"empty", "", []Task{}},
+		{"simple", "abc. def.", []Task{{Description: "abc."}, {Description: "def."}}},
+		{"code", "[123] abc. [456] def.", []Task{{Reference: "123", Description: "abc."}, {Reference: "456", Description: "def."}}},
 	}
 
 	for _, item := range list {
 		t.Run(item.Name, func(t *testing.T) {
-			got := splitAppend(item.Input, stop)
+			got := splitDescription(item.Input, stop, ensureStop)
 			if !reflect.DeepEqual(got, item.Output) {
 				t.Fatalf("want %q, got %q", item.Output, got)
 			}

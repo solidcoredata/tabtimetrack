@@ -2,6 +2,7 @@ package tabtimetrack
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -14,16 +15,25 @@ import (
 )
 
 type File struct {
-	Title string
-	List  []Line
+	Title    string
+	List     []Line
+	Breakout []Task
+	Rate     *big.Rat
+}
+
+type Task struct {
+	Reference   string
+	Description string
 }
 
 type Line struct {
+	Number      int
 	Date        civil.Date
 	Start       civil.Time // Inclusive.
 	Stop        civil.Time // Inclusive.
-	Duration    time.Duration
 	Description string
+	Duration    time.Duration
+	TaskList    []Task
 }
 
 func timeDur(t civil.Time) time.Duration {
@@ -61,18 +71,52 @@ func ParseTime(bb []byte) (civil.Time, error) {
 }
 
 func Parse(data []byte) (f File, err error) {
+	const stop = "."
 	ll := bytes.Split(data, []byte{'\n'})
 	for i, l := range ll {
 		ln := i + 1
+
 		ww := bytes.Split(l, []byte{'\t'})
 		if i == 0 && len(ww) == 1 {
 			f.Title = string(ww[0])
 			continue
 		}
-		if len(ww) < 3 {
-			if len(ww[0]) == 0 {
-				continue
+		if len(ww) == 1 && len(ww[0]) == 0 {
+			continue
+		}
+		if len(ww[0]) > 0 && ww[0][0] == '@' {
+			switch string(ww[0]) {
+			default:
+				return f, fmt.Errorf("line %d: unknown command %s", ln, ww[0])
+			case "@breakout":
+				if len(ww) != 2 {
+					return f, fmt.Errorf("line %d: missing expected breakout description", ln)
+				}
+				bb := splitDescription(string(ww[1]), stop, ensureNoStop)
+				if len(bb) == 0 {
+					return f, fmt.Errorf("line %d: missing expected breakout description", ln)
+				}
+				f.Breakout = append(f.Breakout, bb...)
+			case "@rate":
+				if f.Rate != nil {
+					return f, fmt.Errorf("line %d: multiple rates per file not allowed", ln)
+				}
+				if len(ww) != 2 {
+					return f, fmt.Errorf("line %d: missing rate value", ln)
+				}
+				var ok bool
+				rateString := string(ww[1])
+				rate := big.NewRat(0, 100)
+				rate, ok = rate.SetString(rateString)
+				if !ok {
+					return f, fmt.Errorf("line %d: parse rate failed %q", ln, rateString)
+				}
+				f.Rate = rate
 			}
+			continue
+		}
+
+		if len(ww) < 3 {
 			return f, fmt.Errorf("line %d: incomplete line", ln)
 		}
 		d, err := civil.ParseDate(string(ww[0]))
@@ -100,14 +144,42 @@ func Parse(data []byte) (f File, err error) {
 			return f, fmt.Errorf("line %d: duration larger then %s, this must be a mistake", ln, maxLine)
 		}
 		f.List = append(f.List, Line{
+			Number:      ln,
 			Date:        d,
 			Start:       ts,
 			Stop:        te,
 			Duration:    dur,
 			Description: desc,
+			TaskList:    splitDescription(desc, stop, ensureStop),
 		})
 	}
-	return f, err
+	sort.Slice(f.List, func(i, j int) bool {
+		a, b := f.List[i], f.List[j]
+		if a.Date != b.Date {
+			return a.Date.Before(b.Date)
+		}
+		if a.Start != b.Start {
+			return a.Start.Before(b.Start)
+		}
+		return a.Stop.Before(b.Stop)
+	})
+	var prev Line
+	var errList error
+	for i, item := range f.List {
+		if i == 0 {
+			prev = item
+			continue
+		}
+		if item.Date != prev.Date {
+			prev = item
+			continue
+		}
+		if prev.Stop == item.Start || prev.Stop.After(item.Start) {
+			errList = errors.Join(errList, fmt.Errorf("line %d overlaps line %d, ensure start and stop are not the same", prev.Number, item.Number))
+		}
+		prev = item
+	}
+	return f, errList
 }
 
 type Code struct {
@@ -121,6 +193,7 @@ type SumLine struct {
 	Duration    time.Duration
 	Hours       *big.Rat
 	Amount      *big.Rat
+	Reference   []string
 	Description []string
 }
 
@@ -136,24 +209,40 @@ func (sl *SumLine) CalcAmount(rate *big.Rat) {
 	sl.Amount.Mul(rate, sl.Hours)
 }
 
-func SumFunc(lineList []Line, f func(d civil.Date) []Code, desc func(code Code) string) []*SumLine {
+type Coder interface {
+	Split(d civil.Date, tasks []Task) ([]Code, error)
+	Describe(code Code) string
+}
+
+func SumFunc(lineList []Line, coder Coder) ([]*SumLine, error) {
 	sums := make(map[Code]*SumLine, 100)
+	var err error
 	for _, line := range lineList {
-		cc := f(line.Date)
+		cc, errLine := coder.Split(line.Date, line.TaskList)
+		if errLine != nil {
+			err = errors.Join(err, fmt.Errorf("sum line %d: %w", line.Number, errLine))
+		}
 		for _, c := range cc {
 			s, ok := sums[c]
 			if !ok {
-				s = &SumLine{Code: c, Name: desc(c)}
+				s = &SumLine{Code: c, Name: coder.Describe(c)}
 				sums[c] = s
 			}
 			s.Duration += line.Duration
-			if len(line.Description) > 0 {
-				s.Description = append(s.Description, line.Description)
+			for _, t := range line.TaskList {
+				if len(t.Description) > 0 {
+					s.Description = append(s.Description, t.Description)
+				}
+				if len(t.Reference) > 0 {
+					s.Reference = append(s.Reference, t.Reference)
+				}
 			}
 		}
 	}
 	list := make([]*SumLine, 0, len(sums))
 	for _, item := range sums {
+		item.Description = sortDeDuplicate(item.Description)
+		item.Reference = sortDeDuplicate(item.Reference)
 		list = append(list, item)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -163,30 +252,51 @@ func SumFunc(lineList []Line, f func(d civil.Date) []Code, desc func(code Code) 
 		}
 		return a.Code.Type < b.Code.Type
 	})
-	return list
+	return list, err
 }
 
-func SplitSortDeDuplicate(ss []string, stop string) []string {
-	return sortDeDuplicate(splitAppend(ss, stop))
-}
+type stopType int
 
-func splitAppend(ss []string, stop string) []string {
-	descList := make([]string, 0, len(ss))
-	for _, s := range ss {
-		dd := strings.SplitAfter(s, stop)
-		for _, d := range dd {
-			d = strings.TrimSpace(d)
-			if len(d) == 0 {
-				continue
-			}
+const (
+	ensureStop stopType = iota
+	ensureNoStop
+	ignoreStop
+)
 
-			if !strings.HasSuffix(d, stop) {
-				d = d + stop
-			}
-			descList = append(descList, d)
+func splitDescription(s string, stop string, st stopType) []Task {
+	dd := strings.SplitAfter(s, stop)
+	list := make([]Task, 0, len(dd))
+	for _, d := range dd {
+		d = strings.TrimSpace(d)
+		if len(d) == 0 {
+			continue
 		}
+		var code string
+		if strings.HasPrefix(d, "[") {
+			xf := strings.Index(d, "]")
+			code = d[1:xf]
+			d = strings.TrimSpace(d[xf+1:])
+		}
+		if len(d) > 0 {
+			switch st {
+			default:
+				panic("unknown stop type")
+			case ensureStop:
+				if !strings.HasSuffix(d, stop) {
+					d = d + stop
+				}
+			case ensureNoStop:
+				d = strings.TrimRight(d, stop)
+			case ignoreStop:
+				// Nothing.
+			}
+		}
+		list = append(list, Task{
+			Reference:   code,
+			Description: d,
+		})
 	}
-	return descList
+	return list
 }
 
 func sortDeDuplicate(ss []string) []string {
