@@ -84,36 +84,41 @@ func Parse(data []byte) (f File, err error) {
 		if len(ww) == 1 && len(ww[0]) == 0 {
 			continue
 		}
-		if len(ww[0]) > 0 && ww[0][0] == '@' {
-			switch string(ww[0]) {
-			default:
-				return f, fmt.Errorf("line %d: unknown command %s", ln, ww[0])
-			case "@breakout":
-				if len(ww) != 2 {
-					return f, fmt.Errorf("line %d: missing expected breakout description", ln)
+		if ww0 := ww[0]; len(ww0) > 0 {
+			switch ww0[0] {
+			case '@':
+				switch string(ww[0]) {
+				default:
+					return f, fmt.Errorf("line %d: unknown command %s", ln, ww0)
+				case "@rem":
+					continue
+				case "@breakout":
+					if len(ww) != 2 {
+						return f, fmt.Errorf("line %d: missing expected breakout description", ln)
+					}
+					bb := splitDescription(string(ww[1]), stop, ensureNoStop)
+					if len(bb) == 0 {
+						return f, fmt.Errorf("line %d: missing expected breakout description", ln)
+					}
+					f.Breakout = append(f.Breakout, bb...)
+				case "@rate":
+					if f.Rate != nil {
+						return f, fmt.Errorf("line %d: multiple rates per file not allowed", ln)
+					}
+					if len(ww) != 2 {
+						return f, fmt.Errorf("line %d: missing rate value", ln)
+					}
+					var ok bool
+					rateString := string(ww[1])
+					rate := big.NewRat(0, 100)
+					rate, ok = rate.SetString(rateString)
+					if !ok {
+						return f, fmt.Errorf("line %d: parse rate failed %q", ln, rateString)
+					}
+					f.Rate = rate
 				}
-				bb := splitDescription(string(ww[1]), stop, ensureNoStop)
-				if len(bb) == 0 {
-					return f, fmt.Errorf("line %d: missing expected breakout description", ln)
-				}
-				f.Breakout = append(f.Breakout, bb...)
-			case "@rate":
-				if f.Rate != nil {
-					return f, fmt.Errorf("line %d: multiple rates per file not allowed", ln)
-				}
-				if len(ww) != 2 {
-					return f, fmt.Errorf("line %d: missing rate value", ln)
-				}
-				var ok bool
-				rateString := string(ww[1])
-				rate := big.NewRat(0, 100)
-				rate, ok = rate.SetString(rateString)
-				if !ok {
-					return f, fmt.Errorf("line %d: parse rate failed %q", ln, rateString)
-				}
-				f.Rate = rate
+				continue
 			}
-			continue
 		}
 
 		if len(ww) < 3 {
