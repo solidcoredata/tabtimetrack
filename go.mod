@@ -1,4 +1,4 @@
-module github.com/solidcoredata/tabtimetracker
+module github.com/solidcoredata/tabtimetrack
 
 go 1.20
 
