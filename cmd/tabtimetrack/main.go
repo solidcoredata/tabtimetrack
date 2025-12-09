@@ -11,8 +11,8 @@ import (
 
 	"cloud.google.com/go/civil"
 	"github.com/kardianos/task"
-	tabtimetrack "github.com/solidcoredata/tabtimetracker"
-	"github.com/solidcoredata/tabtimetracker/datatable"
+	"github.com/solidcoredata/tabtimetrack"
+	"github.com/solidcoredata/tabtimetrack/datatable"
 )
 
 func main() {
