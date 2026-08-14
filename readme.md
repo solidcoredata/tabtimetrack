@@ -32,4 +32,20 @@ Maintain a file per customer per billing cycle. Once billed, archive the file. B
 
 In whatever text editor you typically use, configure a macro to enter in the current date and time (`date<tab>time<tab>`), and a macro to just enter in the time (`time<tab>`). 
 
+## Capitalized expenses
+
+With the `-cap` flag enabled, a bracketed `c` marker in a description marks that
+sentence as capitalized work, much like an issue reference (`[1234]`). The line's
+time is split evenly per sentence between capitalized and non-capitalized sums,
+reported as `Sum-Capitalized` and `Sum-NonCapitalized`:
+
+```
+2023-08-01	08:00	10:00	[c] [856] Installed server rack. Fixed software bug.
+```
+
+The above 2 hour line reports 1 hour capitalized, 1 hour non-capitalized. The
+marker may be combined with an issue reference (`[c] [856] ...` or `[856] [c] ...`)
+and is case-insensitive. Use `-desc c,nc` (or `capitalized,non-capitalized`) to
+print the description summaries split by capitalized vs non-capitalized.
+
 

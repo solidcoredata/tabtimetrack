@@ -23,16 +23,18 @@ func main() {
 }
 
 const (
-	typeDay           = 1
-	typeWeek          = 2
-	typeMonth         = 3
-	typeYear          = 4
-	typeAll           = 5
-	typeAllNoBreakout = 6
-	typeBreakout      = 11
+	typeDay            = 1
+	typeWeek           = 2
+	typeMonth          = 3
+	typeYear           = 4
+	typeAll            = 5
+	typeAllNoBreakout  = 6
+	typeBreakout       = 11
+	typeCapitalized    = 12
+	typeNonCapitalized = 13
 )
 
-const segmentType = "day(d)|week(wk)|month(mo)|year(yr)|all(a)|all-breakout(ab)|breakout(br)"
+const segmentType = "day(d)|week(wk)|month(mo)|year(yr)|all(a)|all-breakout(ab)|breakout(br)|capitalized(c)|non-capitalized(nc)"
 
 func parseType(list string) ([]int32, error) {
 	ss := strings.Split(list, ",")
@@ -56,15 +58,20 @@ func parseType(list string) ([]int32, error) {
 			tt = append(tt, typeAllNoBreakout, typeBreakout)
 		case "br", "breakout":
 			tt = append(tt, typeBreakout)
+		case "c", "cap", "capitalized":
+			tt = append(tt, typeCapitalized)
+		case "nc", "noncap", "non-capitalized":
+			tt = append(tt, typeNonCapitalized)
 		}
 	}
 	return tt, nil
 }
 
-func NewCoder(breakout []tabtimetrack.Task) *coder {
+func NewCoder(breakout []tabtimetrack.Task, capitalized bool) *coder {
 	c := &coder{
 		breakoutReferenceLookup:  make(map[string]Task),
 		breakoutAssignmentLookup: make(map[int32]Task),
+		capitalized:              capitalized,
 	}
 	var nv int32
 	for _, b := range breakout {
@@ -87,6 +94,7 @@ type Task struct {
 type coder struct {
 	breakoutReferenceLookup  map[string]Task
 	breakoutAssignmentLookup map[int32]Task
+	capitalized              bool
 }
 
 var _ tabtimetrack.Coder = &coder{}
@@ -106,26 +114,42 @@ func (c *coder) Split(d civil.Date, taskList []tabtimetrack.Task) ([]tabtimetrac
 			differentReference = true
 		}
 	}
+	var codes []tabtimetrack.Code
+	var err error
 	if breakoutValue > 0 {
-		var err error
 		if differentReference {
 			err = fmt.Errorf("multiple different breakout references on same time line cannot be split")
 		}
-		return []tabtimetrack.Code{
+		codes = []tabtimetrack.Code{
 			{Type: typeAll, Value: 0},
 			{Type: typeBreakout, Value: breakoutValue},
-		}, err
+		}
+	} else {
+		t := d.In(time.Local)
+		yr, wk := t.ISOWeek()
+		codes = []tabtimetrack.Code{
+			{Type: typeAll, Value: 0},
+			{Type: typeAllNoBreakout, Value: 0},
+			{Type: typeDay, Value: int32(d.Year*10000 + int(d.Month)*100 + d.Day)},
+			{Type: typeWeek, Value: int32(yr*100 + wk)},
+			{Type: typeMonth, Value: int32(yr*100 + int(d.Month))},
+			{Type: typeYear, Value: int32(yr)},
+		}
 	}
-	t := d.In(time.Local)
-	yr, wk := t.ISOWeek()
-	return []tabtimetrack.Code{
-		{Type: typeAll, Value: 0},
-		{Type: typeAllNoBreakout, Value: 0},
-		{Type: typeDay, Value: int32(d.Year*10000 + int(d.Month)*100 + d.Day)},
-		{Type: typeWeek, Value: int32(yr*100 + wk)},
-		{Type: typeMonth, Value: int32(yr*100 + int(d.Month))},
-		{Type: typeYear, Value: int32(yr)},
-	}, nil
+	if c.capitalized {
+		var hasCap bool
+		for _, t := range taskList {
+			if t.Capitalized {
+				hasCap = true
+				break
+			}
+		}
+		if hasCap {
+			codes = append(codes, tabtimetrack.Code{Type: typeCapitalized, Filter: tabtimetrack.FilterCapitalized})
+		}
+		codes = append(codes, tabtimetrack.Code{Type: typeNonCapitalized, Filter: tabtimetrack.FilterNotCapitalized})
+	}
+	return codes, err
 }
 func (c *coder) Describe(code tabtimetrack.Code) string {
 	v := code.Value
@@ -141,6 +165,10 @@ func (c *coder) Describe(code tabtimetrack.Code) string {
 			return t.Description
 		}
 		return t.Reference
+	case typeCapitalized:
+		return "Sum-Capitalized"
+	case typeNonCapitalized:
+		return "Sum-NonCapitalized"
 	case typeAll:
 		return "Sum"
 	case typeAllNoBreakout:
@@ -169,13 +197,18 @@ func run(ctx context.Context) error {
 	descTableLength := flag.Int("length", 50, "table description length, negative for unlimited")
 	descTypeString := flag.String("desc", "", "show descriptions summarazed by "+segmentType)
 	outputTypeString := flag.String("ot", "tsv", "output type: tsv|csv")
+	capitalized := flag.Bool("cap", false, "enable [c] capitalized marker in descriptions, splits time between capitalized and non-capitalized sums")
 	flag.Parse()
 
 	bb, err := os.ReadFile(*fn)
 	if err != nil {
 		return err
 	}
-	f, err := tabtimetrack.Parse(bb)
+	var parseOptions tabtimetrack.Options
+	if *capitalized {
+		parseOptions.CapitalizedCode = "c"
+	}
+	f, err := tabtimetrack.Parse(bb, parseOptions)
 	if err != nil {
 		return err
 	}
@@ -204,7 +237,7 @@ func run(ctx context.Context) error {
 		w.Line("Date", "hms", "dec", "Bill", "Description")
 	}
 
-	c := NewCoder(f.Breakout)
+	c := NewCoder(f.Breakout, *capitalized)
 	sums, sumError := tabtimetrack.SumFunc(f.List, c)
 	for _, sl := range sums {
 		var amount string

@@ -24,6 +24,7 @@ type File struct {
 type Task struct {
 	Reference   string
 	Description string
+	Capitalized bool
 }
 
 type Line struct {
@@ -70,7 +71,18 @@ func ParseTime(bb []byte) (civil.Time, error) {
 	return ct, nil
 }
 
-func Parse(data []byte) (f File, err error) {
+type Options struct {
+	// CapitalizedCode enables the capitalized marker in descriptions, for
+	// example "[c] Installed server rack." A bracketed code matching this
+	// value marks the task as capitalized instead of as a reference.
+	CapitalizedCode string
+}
+
+func Parse(data []byte, options ...Options) (f File, err error) {
+	var opt Options
+	if len(options) > 0 {
+		opt = options[0]
+	}
 	const stop = "."
 	ll := bytes.Split(data, []byte{'\n'})
 	for i, l := range ll {
@@ -96,7 +108,7 @@ func Parse(data []byte) (f File, err error) {
 					if len(ww) != 2 {
 						return f, fmt.Errorf("line %d: missing expected breakout description", ln)
 					}
-					bb := splitDescription(string(ww[1]), stop, ensureNoStop)
+					bb := splitDescription(string(ww[1]), stop, ensureNoStop, opt.CapitalizedCode)
 					if len(bb) == 0 {
 						return f, fmt.Errorf("line %d: missing expected breakout description", ln)
 					}
@@ -155,7 +167,7 @@ func Parse(data []byte) (f File, err error) {
 			Stop:        te,
 			Duration:    dur,
 			Description: desc,
-			TaskList:    splitDescription(desc, stop, ensureStop),
+			TaskList:    splitDescription(desc, stop, ensureStop, opt.CapitalizedCode),
 		})
 	}
 	sort.Slice(f.List, func(i, j int) bool {
@@ -187,9 +199,23 @@ func Parse(data []byte) (f File, err error) {
 	return f, errList
 }
 
+const (
+	// FilterAll attributes the full line duration and all tasks to the code.
+	FilterAll byte = iota
+	// FilterCapitalized attributes only the capitalized tasks (and their
+	// even share of the line duration) to the code.
+	FilterCapitalized
+	// FilterNotCapitalized attributes only the non-capitalized tasks (and
+	// their even share of the line duration) to the code.
+	FilterNotCapitalized
+)
+
 type Code struct {
 	Type  int32
 	Value int32
+	// Filter selects which tasks on a line are attributed to this code.
+	// Defaults to FilterAll when zero.
+	Filter byte
 }
 
 type SumLine struct {
@@ -227,19 +253,56 @@ func SumFunc(lineList []Line, coder Coder) ([]*SumLine, error) {
 		if errLine != nil {
 			err = errors.Join(err, fmt.Errorf("sum line %d: %w", line.Number, errLine))
 		}
+		var perTask, rem time.Duration
+		if n := len(line.TaskList); n > 0 {
+			perTask = line.Duration / time.Duration(n)
+			rem = line.Duration - perTask*time.Duration(n)
+		} else {
+			// Lines without any tasks: all time is unclassified, count
+			// it towards the non-capitalized filter below.
+			rem = line.Duration
+		}
+		// The remainder from integer division (and all time on lines
+		// without tasks) is attributed to the filter matching the last
+		// task, or non-capitalized when there are no tasks. This keeps
+		// the filtered sums equal to the unfiltered sums.
+		remFilter := FilterNotCapitalized
+		if n := len(line.TaskList); n > 0 && line.TaskList[n-1].Capitalized {
+			remFilter = FilterCapitalized
+		}
 		for _, c := range cc {
 			s, ok := sums[c]
 			if !ok {
 				s = &SumLine{Code: c, Name: coder.Describe(c)}
 				sums[c] = s
 			}
-			s.Duration += line.Duration
-			for _, t := range line.TaskList {
-				if len(t.Description) > 0 {
-					s.Description = append(s.Description, t.Description)
+			switch c.Filter {
+			case FilterCapitalized, FilterNotCapitalized:
+				capOnly := c.Filter == FilterCapitalized
+				for _, t := range line.TaskList {
+					if t.Capitalized != capOnly {
+						continue
+					}
+					s.Duration += perTask
+					if len(t.Description) > 0 {
+						s.Description = append(s.Description, t.Description)
+					}
+					if len(t.Reference) > 0 {
+						s.Reference = append(s.Reference, t.Reference)
+					}
 				}
-				if len(t.Reference) > 0 {
-					s.Reference = append(s.Reference, t.Reference)
+				if c.Filter == remFilter {
+					s.Duration += rem
+				}
+			default:
+				s.Duration += line.Duration
+				for _, t := range line.TaskList {
+					if len(t.Description) > 0 {
+						s.Description = append(s.Description, t.Description)
+					}
+					if len(t.Reference) > 0 {
+						s.Reference = append(s.Reference, t.Reference)
+					}
 				}
 			}
 		}
@@ -268,7 +331,7 @@ const (
 	ignoreStop
 )
 
-func splitDescription(s string, stop string, st stopType) []Task {
+func splitDescription(s string, stop string, st stopType, capCode string) []Task {
 	dd := strings.SplitAfter(s, stop)
 	list := make([]Task, 0, len(dd))
 	for _, d := range dd {
@@ -277,10 +340,21 @@ func splitDescription(s string, stop string, st stopType) []Task {
 			continue
 		}
 		var code string
-		if strings.HasPrefix(d, "[") {
+		var capitalized bool
+		for strings.HasPrefix(d, "[") {
 			xf := strings.Index(d, "]")
-			code = d[1:xf]
+			if xf < 1 {
+				break
+			}
+			bb := d[1:xf]
 			d = strings.TrimSpace(d[xf+1:])
+			if len(capCode) > 0 && strings.EqualFold(bb, capCode) {
+				capitalized = true
+				continue
+			}
+			if len(code) == 0 {
+				code = bb
+			}
 		}
 		if len(d) > 0 {
 			switch st {
@@ -299,6 +373,7 @@ func splitDescription(s string, stop string, st stopType) []Task {
 		list = append(list, Task{
 			Reference:   code,
 			Description: d,
+			Capitalized: capitalized,
 		})
 	}
 	return list
