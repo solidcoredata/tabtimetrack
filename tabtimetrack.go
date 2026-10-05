@@ -156,7 +156,7 @@ func Parse(data []byte, options ...Options) (f File, err error) {
 		if dur < 0 {
 			return f, fmt.Errorf("line %d: duration negative, end time before start time", ln)
 		}
-		const maxLine = 10 * time.Hour
+		const maxLine = 14 * time.Hour
 		if dur > maxLine {
 			return f, fmt.Errorf("line %d: duration larger then %s, this must be a mistake", ln, maxLine)
 		}
